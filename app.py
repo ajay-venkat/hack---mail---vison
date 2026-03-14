@@ -4,9 +4,9 @@ import numpy as np
 import time
 import streamlit.components.v1 as components
 from streamlit_webrtc import webrtc_streamer, RTCConfiguration, WebRtcMode
-from streamlit_autorefresh import st_autorefresh
 from ultralytics import YOLO
 import torch
+import av
 
 # --- HIGH CONTRAST ACCESSIBILITY UI CONFIG ---
 st.set_page_config(page_title="VisionAid", page_icon="👁️", layout="centered")
@@ -240,8 +240,8 @@ No screen interaction is needed during navigation.
 </div>
 """, unsafe_allow_html=True)
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"**Frames Processed:** {st.session_state.frame_count}")
-st.sidebar.markdown(f"**Objects Detected:** {st.session_state.det_count}")
+# Placeholder for stats updated dynamically
+stats_placeholder = st.sidebar.empty()
 
 # --- ML MODELS ---
 @st.cache_resource(show_spinner="Loading YOLOv8s model...")
@@ -379,49 +379,11 @@ def get_dir_icon(direction):
     return "▲"
 
 # --- WEBRTC PROCESSOR ---
-import av
 class VideoProcessor:
-    def __init__(self):
-        self.frame = None
     def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        self.frame = img
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-# --- MAIN UI ---
-st.markdown("<h1>VisionAid</h1>", unsafe_allow_html=True)
-st.markdown("<p class='caregiver-subtitle'>👁 CAREGIVER VIEW — Live Detection Monitor</p>", unsafe_allow_html=True)
-
-webrtc_ctx = webrtc_streamer(
-    key="visionaid",
-    mode=WebRtcMode.SENDRECV,
-    rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
-    video_processor_factory=VideoProcessor,
-    media_stream_constraints={"video": {"facingMode": "environment"}, "audio": False},
-    async_processing=True,
-)
-
-if webrtc_ctx.state.playing:
-    # 500ms loop
-    st_autorefresh(interval=500, key="nav_loop")
-    
-    if webrtc_ctx.video_processor and webrtc_ctx.video_processor.frame is not None:
-        frame_bgr = webrtc_ctx.video_processor.frame.copy()
+        frame_bgr = frame.to_ndarray(format="bgr24")
         orig_h, orig_w = frame_bgr.shape[:2]
-        st.session_state.frame_count += 1
         
-        # Dark frame check
-        avg_brightness = np.mean(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY))
-        now_sec = time.time()
-        if avg_brightness < 30:
-            if now_sec - st.session_state.last_dark_warn > 5:
-                trigger_voice_and_haptic(lang_cfg["dark"], "FAR")
-                st.session_state.last_dark_warn = now_sec
-            st.session_state.ui_msg = lang_cfg["dark"]
-            st.session_state.ui_msg_class = "dist-very-close"
-            st.session_state.snapshot = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            st.rerun()
-            
         # Inference with Letterbox (YOLOv8s)
         lb_img, scale, pad_x, pad_y = letterbox(frame_bgr)
         results = MODEL(lb_img, verbose=False, conf=0.70)[0]
@@ -469,14 +431,10 @@ if webrtc_ctx.state.playing:
                 "rank": (is_prio, dist_rank)
             })
             
-        st.session_state.det_count += len(detections)
-            
-        # UI & Voice Logic
-        st.session_state.ui_msg = ""
+        # Draw on frame and prepare global messages
+        annotated_frame = frame_bgr.copy()
         
         if len(detections) > 0:
-            st.session_state.empty_frames = 0
-            
             # Sort: Priority first, then closest
             detections.sort(key=lambda x: x["rank"])
             
@@ -485,72 +443,38 @@ if webrtc_ctx.state.playing:
             
             # Draw primary bbox thick
             px1, py1, px2, py2 = primary["bbox"]
-            cv2.rectangle(frame_bgr, (px1, py1), (px2, py2), (0, 0, 255), 4)
-            
-            # Announce formula
-            if pdist == "VERY_CLOSE" and pdir == "CENTER":
-                announce = f"{lang_cfg['warning']}! {plabel} {lang_cfg['ahead']}, {lang_cfg['very_close']}"
-            elif pdist == "FAR" and pdir == "CENTER":
-                announce = f"{plabel} {lang_cfg['ahead']}"
-            else:
-                dir_str = lang_cfg["left"] if pdir == "LEFT" else (lang_cfg["right"] if pdir == "RIGHT" else lang_cfg["ahead"])
-                dist_str = lang_cfg["very_close"] if pdist == "VERY_CLOSE" else (lang_cfg["close"] if pdist == "CLOSE" else (lang_cfg["nearby"] if pdist == "MEDIUM" else ""))
-                announce = f"{plabel} {dir_str}, {dist_str}".strip(", ")
-                
-            trigger_voice_and_haptic(announce, pdist)
-            
+            cv2.rectangle(annotated_frame, (px1, py1), (px2, py2), (0, 0, 255), 4)
+            # Label
             icon = get_dir_icon(pdir)
-            st.session_state.ui_msg = f"{icon} {plabel.upper()} {pdist}"
-            st.session_state.ui_msg_class = get_dist_class(pdist)
+            cv2.putText(annotated_frame, f"{plabel.upper()} {pdist}", (px1, py1 - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
             
-        elif midas_dist in ["VERY_CLOSE", "CLOSE"] and midas_dist not in yolo_active_dists:
-            # MiDaS Depth trigger since YOLO is empty
-            st.session_state.empty_frames = 0
-            dist_str = lang_cfg["very_close"] if midas_dist == "VERY_CLOSE" else lang_cfg["close"]
-            announce = f"{lang_cfg['warning']}! {lang_cfg['obstacle']}, {dist_str}"
-            
-            trigger_voice_and_haptic(announce, midas_dist)
-            
-            st.session_state.ui_msg = f"▲ {lang_cfg['obstacle'].upper()} {midas_dist}"
-            st.session_state.ui_msg_class = get_dist_class(midas_dist)
-            
-        else:
-            st.session_state.empty_frames += 1
-            if st.session_state.empty_frames == 3:
-                trigger_voice_and_haptic(lang_cfg["clear"], "FAR")
-                st.session_state.ui_msg = lang_cfg["clear"]
-                st.session_state.ui_msg_class = "status-clear"
-                
-            if st.session_state.empty_frames > 3:
-                 st.session_state.ui_msg = lang_cfg["clear"]
-                 st.session_state.ui_msg_class = "status-clear"
-                 
-        # Always append caregiver badge if detecting
-        if st.session_state.ui_msg and st.session_state.ui_msg != lang_cfg["clear"]:
-            st.session_state.ui_msg += "<br><span style='font-size: 0.9rem; color: #888888;'>🔊 Announced to user via voice</span>"
-            
-        # Show snapshot
-        st.session_state.snapshot = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
 
-st.markdown("<h3 style='margin-bottom:0;'>Live Detection Feed — Caregiver View</h3>", unsafe_allow_html=True)
-# Display Frame
-if st.session_state.snapshot is not None:
-    st.image(st.session_state.snapshot, use_container_width=True)
-else:
-    if not webrtc_ctx.state.playing:
-        st.markdown("<div style='height: 300px; display: flex; align-items: center; justify-content: center; color: #666; font-size: 1.5rem;'>CAMERA OFF</div>", unsafe_allow_html=True)
-        # Reset state when stopped
-        st.session_state.empty_frames = 0
-        st.session_state.last_spoken = ""
-        st.session_state.ui_msg = "START NAVIGATION to begin"
-        st.session_state.ui_msg_class = "status-clear"
-        st.session_state.snapshot = None
-        
-# Display Panel
+
+# --- MAIN UI ---
+st.markdown("<h1>VisionAid</h1>", unsafe_allow_html=True)
+st.markdown("<p class='caregiver-subtitle'>👁 CAREGIVER VIEW — Live Detection Monitor</p>", unsafe_allow_html=True)
+
+webrtc_ctx = webrtc_streamer(
+    key="visionaid",
+    mode=WebRtcMode.SENDRECV,
+    rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+    video_processor_factory=VideoProcessor,
+    media_stream_constraints={"video": {"facingMode": "environment"}, "audio": False},
+    # Important: False means the recv runs synchronously in the main thread space 
+    # so we can draw annotations inline safely.
+    async_processing=False,
+)
+
+stats_placeholder.markdown(f"**Frames Processed:** {st.session_state.frame_count}\n\n**Objects Detected:** {st.session_state.det_count}")
+
+# Status panel below the video component
 st.markdown(f"""
     <div class="status-panel">
         <div class="status-text {st.session_state.ui_msg_class}">
-            {st.session_state.ui_msg}
+            {st.session_state.ui_msg}<br>
+            <span style='font-size: 0.9rem; color: #888888;'>🔊 Announcements managed via voice</span>
         </div>
     </div>
 """, unsafe_allow_html=True)
