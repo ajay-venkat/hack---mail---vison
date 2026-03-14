@@ -12,7 +12,9 @@
 ## ✨ Key Features
 
 ### 🚀 Real-Time Intelligence
+
 ![Navigation Logic Diagram](./assets/navigation_logic.png)
+
 - **YOLOv8n Object Detection**: High-speed detection of people, vehicles, stairs, and household obstacles.
 - **Lightweight Obstacle Detection**: A unique proprietary contour-based detector (<5ms) that identifies unknown obstacles even when the primary AI is idle.
 - **Spatial Auditory Cues**: Categorizes detects into **Left, Center,** and **Right** zones with relative distance estimation.
@@ -23,7 +25,9 @@
 - **High-Contrast UI**: A sleek, accessibility-first "Caregiver View" designed for high visibility and monitoring.
 
 ### ⚡ Performance Optimized
+
 ![Lightweight Detection Flow Diagram](./assets/detection_flow.png)
+
 - **Minimal Latency Engine**: Optimized for CPU-only environments (like Streamlit Cloud) using frame-skipping logic and reduced inference resolution.
 - **Memory Efficient**: Removed heavy dependencies (Torch/Timm) in favor of a lean, high-performance runtime.
 
@@ -42,7 +46,9 @@
 ## 🚀 Getting Started
 
 ### 🌐 Cloud Access
+
 The fastest way to experience VisionAid is via our livedeploy:
+
 👉 **[Launch VisionAid on Streamlit Cloud](https://visionaid.streamlit.app/)**
 
 ### 💻 Local Installation
@@ -79,14 +85,16 @@ libglib2.0-bin
 ## 🗺️ Navigation Logic
 
 VisionAid uses a priority-based announcement system:
-*   **Urgent Warnings**: "Stop! Object Ahead" triggered for critical proximity.
-*   **Spatial Context**: "Person on your left", "Car moving right".
-*   **Safety Debounce**: Intelligent 800ms-1500ms debouncing to prevent audio fatigue while maintaining safety.
-*   **Clear Path**: Frequent "Path appears clear" heartbeats to provide user confidence during movement.
+
+- **Urgent Warnings**: "Stop! Object Ahead" triggered for critical proximity.
+- **Spatial Context**: "Person on your left", "Car moving right".
+- **Safety Debounce**: Intelligent 800ms-1500ms debouncing to prevent audio fatigue while maintaining safety.
+- **Clear Path**: Frequent "Path appears clear" heartbeats to provide user confidence during movement.
 
 ---
 
 ## 🍓 Hardware Editions
+
 The repository also includes `pi_navigator.py` and `pi_setup.sh`, a dedicated version optimized for **Raspberry Pi 5** hardware, leveraging OpenVINO for on-device edge acceleration.
 
 ---
