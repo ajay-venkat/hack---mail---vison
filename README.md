@@ -1,5 +1,7 @@
 # 🧭 VisionAid: AI-Powered Autonomous Navigator
 
+![VisionAid Premium Banner](./assets/banner.png)
+
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg.svg)](https://visionaid.streamlit.app/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -10,7 +12,7 @@
 ## ✨ Key Features
 
 ### 🚀 Real-Time Intelligence
-![Navigation Logic Diagram](/C:/Users/dabin/.gemini/antigravity/brain/ef275fba-f514-4307-a5e7-8b0b54f8a02d/visionaid_navigation_logic_diagram_1773466528855.png)
+![Navigation Logic Diagram](./assets/navigation_logic.png)
 - **YOLOv8n Object Detection**: High-speed detection of people, vehicles, stairs, and household obstacles.
 - **Lightweight Obstacle Detection**: A unique proprietary contour-based detector (<5ms) that identifies unknown obstacles even when the primary AI is idle.
 - **Spatial Auditory Cues**: Categorizes detects into **Left, Center,** and **Right** zones with relative distance estimation.
@@ -21,7 +23,7 @@
 - **High-Contrast UI**: A sleek, accessibility-first "Caregiver View" designed for high visibility and monitoring.
 
 ### ⚡ Performance Optimized
-![Lightweight Detection Flow Diagram](/C:/Users/dabin/.gemini/antigravity/brain/ef275fba-f514-4307-a5e7-8b0b54f8a02d/visionaid_lightweight_detection_flow_1773466551887.png)
+![Lightweight Detection Flow Diagram](./assets/detection_flow.png)
 - **Minimal Latency Engine**: Optimized for CPU-only environments (like Streamlit Cloud) using frame-skipping logic and reduced inference resolution.
 - **Memory Efficient**: Removed heavy dependencies (Torch/Timm) in favor of a lean, high-performance runtime.
 
