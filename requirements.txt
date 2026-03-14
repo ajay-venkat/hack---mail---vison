@@ -1,10 +1,7 @@
-streamlit
-opencv-python-headless
-streamlit-webrtc
-streamlit-autorefresh
-av
-numpy
-pypdf
-huggingface_hub
-ultralytics
-pyttsx3
+streamlit>=1.32.0
+ultralytics>=8.0.0
+opencv-python-headless>=4.9.0
+numpy>=1.24.0
+Pillow>=10.0.0
+streamlit-webrtc>=0.47.0
+streamlit-autorefresh>=1.0.1
