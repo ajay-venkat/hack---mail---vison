@@ -342,11 +342,11 @@ stats_ph = st.sidebar.empty()
 # ─── MODEL LOADING ───────────────────────────────────────────────────────────
 
 CUSTOM_MODEL   = "best_sunrgbd.pt"
-FALLBACK_MODEL = "yolov8m.pt"          # YOLOv8 Medium
+FALLBACK_MODEL = "yolov8s.pt"          # YOLOv8 Small for speed
 
 CONF_THRESHOLD = 0.55
 IOU_THRESHOLD  = 0.45
-INFER_IMGSZ    = 640
+INFER_IMGSZ    = 320                   # Reduced resolution for speed
 
 @st.cache_resource(show_spinner="Loading YOLOv8m model...")
 def load_yolo():
@@ -641,7 +641,7 @@ class VideoProcessor:
         self.total_frames += 1
 
         now = time.time()
-        if now - self.last_infer_time >= 0.4:   # 400ms inference interval
+        if now - self.last_infer_time >= 0.6:   # 600ms inference interval (reduced framerate to fix lag)
 
             lb_img, s, px, py = letterbox(img, INFER_IMGSZ)
             results = MODEL(lb_img, verbose=False,
