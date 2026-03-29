@@ -371,9 +371,9 @@ stats_ph = st.sidebar.empty()
 # ─── MODEL LOADING & CONFIG ──────────────────────────────────────────────────
 
 CUSTOM_MODEL   = "best_sunrgbd.pt"
-FALLBACK_MODEL = "yolov8m.pt"          # YOLOv8 Medium (better for furniture)
+FALLBACK_MODEL = "yolov8s.pt"          # YOLOv8 Small (faster on CPU)
 
-INFER_IMGSZ    = 960                   # High res for smaller objects
+INFER_IMGSZ    = 480                   # Moderate res to reduce lag
 IOU_THRESHOLD  = 0.45
 
 # Class-specific confidence
@@ -389,14 +389,14 @@ CLASS_CONF_THRESHOLDS = {
 # Using ultralytics built-in filtering (max performance), we set baseline to lowest
 BASE_CONF = min(CLASS_CONF_THRESHOLDS.values())
 
-@st.cache_resource(show_spinner="Loading YOLOv8m model...")
+@st.cache_resource(show_spinner="Loading YOLO model...")
 def load_yolo():
     if os.path.exists(CUSTOM_MODEL):
         m    = YOLO(CUSTOM_MODEL)
         name = f"SUN RGB-D Fine-tuned ({CUSTOM_MODEL}) @ {INFER_IMGSZ}px"
     else:
         m    = YOLO(FALLBACK_MODEL)
-        name = f"YOLOv8m COCO ({FALLBACK_MODEL}) @ {INFER_IMGSZ}px"
+        name = f"YOLO COCO ({FALLBACK_MODEL}) @ {INFER_IMGSZ}px"
     return m, name
 
 try:
@@ -710,7 +710,7 @@ class VideoProcessor:
         self.total_frames += 1
 
         now = time.time()
-        if now - self.last_infer_time >= 0.6:  
+        if now - self.last_infer_time >= 0.7:  # 700ms interval to stop lag
 
             lb_img, s, px, py = letterbox(img, INFER_IMGSZ)
             results = MODEL(lb_img, verbose=False, conf=BASE_CONF, iou=IOU_THRESHOLD, imgsz=INFER_IMGSZ)[0]
