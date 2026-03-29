@@ -1,8 +1,22 @@
+# Core Streamlit & Web
 streamlit>=1.32.0
-ultralytics>=8.0.0
+streamlit-webrtc>=0.47.0
+streamlit-autorefresh>=1.0.1
+
+# Vision & ML
+ultralytics>=8.1.0
 opencv-python-headless>=4.9.0
 numpy>=1.24.0
 Pillow>=10.0.0
-streamlit-webrtc>=0.47.0
-streamlit-autorefresh>=1.0.1
+
+# WebRTC
 av>=11.0.0
+
+# Training dependencies (only needed locally for train.py)
+# torch and torchvision are auto-installed by ultralytics
+# PyYAML is already included in ultralytics
+scipy>=1.10.0
+
+# Dataset download helpers
+requests>=2.28.0
+tqdm>=4.65.0
