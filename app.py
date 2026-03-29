@@ -261,42 +261,65 @@ components.html("""
     padding:15px 30px;font-size:1.2rem;font-weight:bold;
     border-radius:8px;cursor:pointer;width:100%;max-width:400px;
     font-family:'Inter',sans-serif;">
-    TAP TO ENABLE HAPTICS
+    TAP TO ENABLE HAPTICS &amp; VOICE
   </button>
   <div id="armed-indicator" style="
     display:none;color:#0F9D58;font-size:1.2rem;font-weight:bold;
     font-family:'Inter',sans-serif;padding:10px;">
-    📳 Haptics ON
+    📳 Haptics ON &nbsp;|&nbsp; 🔊 Voice ON
   </div>
 </div>
 <script>
-window.hapticsArmed = false;
-window.currentVibrationPattern = [0];
-window.lastVibrationPattern    = [0];
-window.lastVibrationTime       = 0;
+// ── Shared state on the PARENT window (accessible by all iframes) ──
+var pw = window.parent;
+pw.hapticsArmed             = pw.hapticsArmed            || false;
+pw.currentVibrationPattern  = pw.currentVibrationPattern || [0];
+pw.lastVibrationPattern     = pw.lastVibrationPattern    || [0];
+pw.lastVibrationTime        = pw.lastVibrationTime       || 0;
+pw.pendingSpeech            = pw.pendingSpeech           || "";
+pw.pendingSpeechLang        = pw.pendingSpeechLang       || "en-US";
+pw.lastSpokenText           = pw.lastSpokenText          || "";
+
 document.getElementById('arm-btn').addEventListener('click', function() {
-    window.hapticsArmed = true;
+    pw.hapticsArmed = true;
     this.style.display = 'none';
     document.getElementById('armed-indicator').style.display = 'block';
     if(navigator.vibrate) navigator.vibrate(50);
+    // Warm up speech engine with a silent utterance
+    var warmup = new SpeechSynthesisUtterance(' ');
+    warmup.volume = 0;
+    window.speechSynthesis.speak(warmup);
 });
+
 setInterval(function() {
-    if(!window.hapticsArmed || !navigator.vibrate) return;
-    let now = Date.now();
-    let patternsMatch = JSON.stringify(window.currentVibrationPattern) ===
-                        JSON.stringify(window.lastVibrationPattern);
-    let timedOut = (now - window.lastVibrationTime) > 2000;
-    if (!patternsMatch || timedOut) {
-        if (window.currentVibrationPattern.length > 0 &&
-            window.currentVibrationPattern[0] !== 0) {
-            navigator.vibrate(window.currentVibrationPattern);
-            window.lastVibrationPattern = [...window.currentVibrationPattern];
-            window.lastVibrationTime    = now;
+    // ── Haptic ──
+    if (pw.hapticsArmed && navigator.vibrate) {
+        let now = Date.now();
+        let same = JSON.stringify(pw.currentVibrationPattern) ===
+                   JSON.stringify(pw.lastVibrationPattern);
+        if (!same || (now - pw.lastVibrationTime) > 2000) {
+            if (pw.currentVibrationPattern[0] !== 0) {
+                navigator.vibrate(pw.currentVibrationPattern);
+                pw.lastVibrationPattern = [...pw.currentVibrationPattern];
+                pw.lastVibrationTime    = now;
+            }
         }
+    }
+    // ── Voice (only this single component ever calls speechSynthesis) ──
+    if (pw.hapticsArmed &&
+        pw.pendingSpeech &&
+        pw.pendingSpeech !== pw.lastSpokenText &&
+        !window.speechSynthesis.speaking) {
+        var u    = new SpeechSynthesisUtterance(pw.pendingSpeech);
+        u.lang   = pw.pendingSpeechLang;
+        u.rate   = 1.0;
+        u.volume = 1.0;
+        window.speechSynthesis.speak(u);
+        pw.lastSpokenText = pw.pendingSpeech;
     }
 }, 300);
 </script>
-""", height=100)
+""", height=110)
 
 
 # ─── SIDEBAR ─────────────────────────────────────────────────────────────────
@@ -465,7 +488,11 @@ class VoiceEngine:
 
 
 def emit_voice_haptic(text: str, dist: str, lang_code: str):
-    """Inject TTS + haptic into browser."""
+    """
+    Set parent-window variables — the single persistent component
+    (haptic+voice block above) picks them up and speaks/vibrates.
+    No speechSynthesis calls here — avoids iframe conflicts.
+    """
     vib = "[150]"
     if   dist == "VERY_CLOSE": vib = "[100,50,100,50,100]"
     elif dist == "CLOSE":      vib = "[200,100,200]"
@@ -474,13 +501,14 @@ def emit_voice_haptic(text: str, dist: str, lang_code: str):
     safe = text.replace("'", "\\'").replace('"', '\\"')
     components.html(f"""
     <script>
-    if (window.parent.window.currentVibrationPattern !== undefined)
-        window.parent.window.currentVibrationPattern = {vib};
-    var u = new SpeechSynthesisUtterance('{safe}');
-    u.lang  = '{lang_code}';
-    u.rate  = 1.0;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+    var pw = window.parent;
+    if (pw.currentVibrationPattern !== undefined)
+        pw.currentVibrationPattern = {vib};
+    if (pw.pendingSpeech !== undefined) {{
+        pw.pendingSpeech     = '{safe}';
+        pw.pendingSpeechLang = '{lang_code}';
+        pw.lastSpokenText    = '';  /* reset so the poller picks it up */
+    }}
     </script>
     """, height=0)
     st.session_state.last_spoken_text = text
