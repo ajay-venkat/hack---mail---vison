@@ -1,25 +1,36 @@
-path: ./sunrgbd_yolo  # root dataset dir
-train: images/train
-val: images/val
-test: images/test
+# ════════════════════════════════════════════════════════════════
+#  VisionAid Pro v4 — Indoor Navigation Dataset
+#  Sources: SUN RGB-D + NYU Depth V2 (merged)
+#  Generated / used by: prepare_dataset.py + train.py
+# ════════════════════════════════════════════════════════════════
 
-nc: 18
+path: ./indoor_dataset    # root dataset dir (prepare_dataset.py output)
+train: images/train
+val:   images/val
+test:  images/test
+
+nc: 23
 names:
-  0: chair
-  1: table
-  2: door
-  3: sofa
-  4: bed
-  5: toilet
-  6: sink
-  7: person
-  8: stairs
-  9: wall
-  10: floor
-  11: cabinet
-  12: desk
-  13: refrigerator
-  14: monitor
-  15: lamp
-  16: pillow
-  17: bookshelf
+  0:  chair
+  1:  table
+  2:  sofa
+  3:  bed
+  4:  desk
+  5:  door
+  6:  stairs
+  7:  person
+  8:  wall
+  9:  floor
+  10: cabinet
+  11: refrigerator
+  12: monitor
+  13: lamp
+  14: pillow
+  15: bookshelf
+  16: sink
+  17: toilet
+  18: window
+  19: curtain
+  20: picture
+  21: counter
+  22: shelf

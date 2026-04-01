@@ -103,42 +103,72 @@ components_html_1 = """
 <div id="haptic-container" style="text-align:center;margin-bottom:10px;">
   <button id="arm-btn" style="background:#1A73E8;color:#fff;border:none;padding:15px 30px;
     font-size:1.2rem;font-weight:bold;border-radius:8px;cursor:pointer;width:100%;max-width:400px;
-    font-family:'Inter',sans-serif;text-transform:uppercase;">
+    font-family:'Inter',sans-serif;text-transform:uppercase;box-shadow:0 4px 6px rgba(0,0,0,0.3);">
     Tap to Enable Audio &amp; Haptics</button>
   <div id="armed-indicator" style="display:none;color:#0F9D58;font-size:1.2rem;font-weight:bold;
-    font-family:'Inter',sans-serif;padding:10px;">📳 Haptics ON &nbsp;|&nbsp; 🔊 Voice ON</div>
+    font-family:'Inter',sans-serif;padding:10px;text-shadow:0 0 10px rgba(15,157,88,0.5);">📳 Haptics ON &nbsp;|&nbsp; 🔊 Voice ON</div>
 </div>
 <audio id="sos-audio" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" loop preload="auto"></audio>
 <script>
-var pw=window;
-pw.hapticsArmed=pw.hapticsArmed||false;
-pw.currentVibrationPattern=pw.currentVibrationPattern||[0];
-pw.lastVibrationPattern=pw.lastVibrationPattern||[0];
-pw.lastVibrationTime=pw.lastVibrationTime||0;
-pw.pendingSpeech=pw.pendingSpeech||"";
-pw.pendingSpeechLang=pw.pendingSpeechLang||"en-US";
-pw.lastSpokenText=pw.lastSpokenText||"";
-pw.triggerSOS=pw.triggerSOS||false;
-document.getElementById('arm-btn').addEventListener('click',function(){
-  pw.hapticsArmed=true;this.style.display='none';
-  document.getElementById('armed-indicator').style.display='block';
-  if(navigator.vibrate)navigator.vibrate(50);
-  var w=new SpeechSynthesisUtterance(' ');w.volume=0;window.speechSynthesis.speak(w);
-  let a=document.getElementById('sos-audio');a.volume=0;a.play().then(()=>a.pause()).catch(e=>{});a.volume=1;
-});
-setInterval(function(){
-  if(pw.hapticsArmed&&navigator.vibrate){
-    let n=Date.now(),s=JSON.stringify(pw.currentVibrationPattern)===JSON.stringify(pw.lastVibrationPattern);
-    if(!s||(n-pw.lastVibrationTime)>2000){if(pw.currentVibrationPattern[0]!==0){
-      navigator.vibrate(pw.currentVibrationPattern);pw.lastVibrationPattern=[...pw.currentVibrationPattern];pw.lastVibrationTime=n;}}
+var pw = window.parent;
+if (pw.hapticsArmed === undefined) {
+    pw.hapticsArmed = false;
+    pw.currentVibrationPattern = [0];
+    pw.lastVibrationPattern = [0];
+    pw.lastVibrationTime = 0;
+    pw.pendingSpeech = "";
+    pw.pendingSpeechLang = "en-US";
+    pw.lastSpokenText = "";
+    pw.triggerSOS = false;
+}
+
+document.getElementById('arm-btn').addEventListener('click', function() {
+  pw.hapticsArmed = true; 
+  this.style.display = 'none';
+  document.getElementById('armed-indicator').style.display = 'block';
+  
+  if (pw.navigator && pw.navigator.vibrate) pw.navigator.vibrate(50);
+  if (pw.speechSynthesis) {
+      var w = new pw.SpeechSynthesisUtterance(' ');
+      w.volume = 0;
+      pw.speechSynthesis.speak(w);
   }
-  if(pw.hapticsArmed&&pw.pendingSpeech&&pw.pendingSpeech!==pw.lastSpokenText&&!window.speechSynthesis.speaking){
-    var u=new SpeechSynthesisUtterance(pw.pendingSpeech);u.lang=pw.pendingSpeechLang;u.rate=1.0;u.volume=1.0;
-    window.speechSynthesis.speak(u);pw.lastSpokenText=pw.pendingSpeech;}
-  let sa=document.getElementById('sos-audio');
-  if(pw.triggerSOS&&sa.paused){window.speechSynthesis.cancel();sa.play();}
-  else if(!pw.triggerSOS&&!sa.paused){sa.pause();sa.currentTime=0;}
-},300);
+  
+  let a = document.getElementById('sos-audio');
+  a.volume = 0;
+  a.play().then(() => a.pause()).catch(e => {});
+  a.volume = 1;
+});
+
+setInterval(function() {
+  if (pw.hapticsArmed && pw.navigator && pw.navigator.vibrate) {
+    let n = Date.now();
+    let s = JSON.stringify(pw.currentVibrationPattern) === JSON.stringify(pw.lastVibrationPattern);
+    if (!s || (n - pw.lastVibrationTime) > 2000) {
+      if (pw.currentVibrationPattern[0] !== 0) {
+        pw.navigator.vibrate(pw.currentVibrationPattern);
+        pw.lastVibrationPattern = [...pw.currentVibrationPattern];
+        pw.lastVibrationTime = n;
+      }
+    }
+  }
+  if (pw.hapticsArmed && pw.pendingSpeech && pw.pendingSpeech !== pw.lastSpokenText && (!pw.speechSynthesis.speaking)) {
+    var u = new pw.SpeechSynthesisUtterance(pw.pendingSpeech);
+    u.lang = pw.pendingSpeechLang;
+    u.rate = 1.0;
+    u.volume = 1.0;
+    pw.speechSynthesis.speak(u);
+    pw.lastSpokenText = pw.pendingSpeech;
+  }
+  let sa = document.getElementById('sos-audio');
+  if (pw.triggerSOS && sa.paused) {
+    if (pw.speechSynthesis) pw.speechSynthesis.cancel();
+    sa.play();
+  } else if (!pw.triggerSOS && !sa.paused) {
+    sa.pause();
+    sa.currentTime = 0;
+  }
+}, 300);
 </script>
 """
 st.html(components_html_1)
@@ -147,7 +177,7 @@ st.html(components_html_1)
 if st.button("🚨 PANIC / SOS"):
     st.session_state.sos_triggered = not st.session_state.sos_triggered
     js = "true" if st.session_state.sos_triggered else "false"
-    st.html(f"<script>window.triggerSOS={js};</script>")
+    st.html(f"<script>window.parent.triggerSOS={js};</script>")
     if st.session_state.sos_triggered:
         st.session_state.ui_msg = f"EMERGENCY HELP: {contact_num}"
         st.session_state.ui_msg_class = "priority-urgent"
@@ -188,34 +218,19 @@ if not st.session_state.tracker_loaded:
     st.session_state.tracker_loaded = True
 
 # ─── VOICE/HAPTIC EMIT ───────────────────────────────────────────────────────
-import base64
-from io import BytesIO
-try:
-    from gtts import gTTS
-except ImportError:
-    pass
-
 def emit_voice_haptic(text, tier, lang_code):
     vib = haptic_pattern(tier)
     
-    audio_html = ""
-    try:
-        tts = gTTS(text=text, lang=lang_code, slow=False)
-        fp = BytesIO()
-        tts.write_to_fp(fp)
-        fp.seek(0)
-        b64 = base64.b64encode(fp.read()).decode()
-        audio_html = f'<audio autoplay src="data:audio/mp3;base64,{b64}"></audio>'
-    except Exception as e:
-        print(f"gTTS error: {e}")
-
-    # Inject gTTS audio and haptics
+    # We use st.html which executes inside a sandbox iframe.
+    # Therefore, we interact with window.parent to persist state across Streamlit autorefreshes.
     st.html(f"""
-    <div style="display:none;">{audio_html}</div>
     <script>
-    var pw=window;
-    if(pw.currentVibrationPattern!==undefined)pw.currentVibrationPattern={vib};
-    </script>""")
+    var pw = window.parent;
+    if (pw.currentVibrationPattern !== undefined) pw.currentVibrationPattern = {vib};
+    pw.pendingSpeech = `{text.replace('`', '')}`;
+    pw.pendingSpeechLang = `{lang_code}`;
+    </script>
+    """)
 
 # ─── VIDEO PROCESSOR ─────────────────────────────────────────────────────────
 class VideoProcessor:
@@ -431,7 +446,14 @@ with c4: st.markdown(f"<div class='hud-box hud-blue'><div class='hud-title'>Scen
 RTC_CONFIGURATION = RTCConfiguration({
     "iceServers": [
         {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]}
+        {
+            "urls": [
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443"
+            ],
+            "username": "openrelayproject",
+            "credential": "openrelayproject"
+        }
     ]
 })
 
