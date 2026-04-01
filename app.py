@@ -539,49 +539,29 @@ with c2: st.markdown(f"<div class='hud-box hud-yellow'><div class='hud-title'>Di
 with c3: st.markdown(f"<div class='hud-box hud-green'><div class='hud-title'>Zone</div><div class='hud-value'>{st.session_state.ui_dir}</div></div>", unsafe_allow_html=True)
 with c4: st.markdown(f"<div class='hud-box hud-blue'><div class='hud-title'>Scene</div><div class='hud-value'>{st.session_state.ui_scene}</div></div>", unsafe_allow_html=True)
 
-RTC_CONFIGURATION = RTCConfiguration({
-    "iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]},
-        {"urls": ["stun:stun3.l.google.com:19302"]},
-        {"urls": ["stun:stun4.l.google.com:19302"]},
-        {
-            "urls": [
-                "turn:openrelay.metered.ca:80",
-                "turn:openrelay.metered.ca:443"
-            ],
-            "username": "openrelayproject",
-            "credential": "openrelayproject"
-        }
-    ]
-})
+# ─── REAL-TIME CAMERA ────────────────────────────────────────────────────────
+RTC_CONFIG = {
+    "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+}
 
-try:
-    webrtc_ctx = webrtc_streamer(
-        key="visionaid",
-        rtc_configuration=RTC_CONFIGURATION,
-        video_processor_factory=VideoProcessor,
-        media_stream_constraints={
-            "video": {
-                "width": {"ideal": 640},
-                "height": {"ideal": 480},
-                "frameRate": {"ideal": 15}
-            },
-            "audio": False
-        },
-        async_processing=True
-    )
-except Exception as e:
-    st.error("Please allow camera access in browser.")
-    webrtc_ctx = None
-    st.camera_input("Fallback Camera")
+webrtc_ctx = webrtc_streamer(
+    key="visionaid-v4",
+    mode=WebRtcMode.SENDRECV,
+    rtc_configuration=RTC_CONFIG,
+    video_processor_factory=VideoProcessor,
+    media_stream_constraints={
+        "video": True,
+        "audio": False
+    },
+    async_processing=True
+)
 
-if webrtc_ctx is None or not webrtc_ctx.state.playing:
-    st.warning("Camera not connected. Click START above.")
-    st.stop()
-else:
+if webrtc_ctx and webrtc_ctx.state.playing:
     st.success("Camera active — processing started")
+else:
+    st.info("👋 Click START to begin real-time navigation")
+    # Don't stop() here, let the UI render the HUD and sidebar map
+
 
 # Detection table
 det_table_area = st.empty()
