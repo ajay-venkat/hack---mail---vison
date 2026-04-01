@@ -305,6 +305,8 @@ def parse_step(step, lang_dict):
         txt = f"Continue for {{n}} metres"
         
     return txt.replace("{n}", str(int(dist))), dist
+
+class VideoProcessor:
     def __init__(self):
         self.latest_label_en = ""
         self.latest_dir = "CENTER"
