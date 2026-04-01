@@ -311,14 +311,32 @@ class MiDaSEngine:
             return float(self.depth_map[y, x])
 
     def detect_wall(self):
-        """If >30% of frame has uniform high depth → wall."""
+        """Multi-region spatial analysis for vertical walls."""
         with self.lock:
             if self.depth_map is None: return False, 0.0
-            high_mask = (self.depth_map > 0.6).astype(np.float32)
-            ratio = np.mean(high_mask)
-            if ratio > 0.30:
-                avg_depth = np.mean(self.depth_map[self.depth_map > 0.6])
+            h, w = self.depth_map.shape
+            
+            # Analyze the upper-middle region (ignore floor at bottom 30%)
+            roi = self.depth_map[int(h*0.1):int(h*0.7), :]
+            
+            # Extract center-vertical slicing
+            c_w = w // 3
+            center_roi = roi[:, c_w:2*c_w]
+            
+            # Flat vertical surfaces have high proximity and incredibly low variance
+            c_mean = np.mean(center_roi)
+            c_var = np.var(center_roi)
+            
+            if c_mean > 0.55 and c_var < 0.05:
+                # Flat, extremely close surface in the direct center path -> Wall/Barrier
+                return True, depth_to_metres(c_mean)
+                
+            # Fallback: if over 40% of the entire upper-middle screen is critically close
+            high_mask = (roi > 0.65).astype(np.float32)
+            if np.mean(high_mask) > 0.40:
+                avg_depth = np.mean(roi[roi > 0.65])
                 return True, depth_to_metres(avg_depth)
+                
         return False, 0.0
 
     def colorize(self, shape):
@@ -520,29 +538,51 @@ def detect_scene(frame):
         return "Corridor"
     return "Indoor"
 
-def detect_contour_obstacles(frame, min_ratio=0.15):
-    """Fallback Layer 3: large contours in frame."""
+def detect_contour_obstacles(frame, min_ratio=0.10):
+    """Fallback Layer 3: Structural edge detection (Canny) to catch missed transparent doors or blank walls."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (11,11), 0)
-    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    h,w = frame.shape[:2]
-    total = h*w
+    h, w = frame.shape[:2]
+    total = h * w
     results = []
+    
+    # Bilateral filter clears out flat texture noise (like carpet) while keeping strong edge boundaries (walls/legs)
+    blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+    edged = cv2.Canny(blurred, 40, 120)
+    
+    # Dilate connects broken structural edges
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    dilated = cv2.dilate(edged, kernel, iterations=2)
+    
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
     for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area / total > min_ratio:
-            x,y,bw,bh = cv2.boundingRect(cnt)
-            results.append({"bbox":(x,y,x+bw,y+bh),"area_ratio":area/total})
+        x, y, bw, bh = cv2.boundingRect(cnt)
+        
+        # We use bounding box area, NOT contour area! 
+        # Canny contour area is just the thin perimeter line. BBox area encompasses the whole object!
+        box_area = bw * bh 
+        
+        if box_area / total > min_ratio:
+            aspect_ratio = float(bw) / float(bh) if bh > 0 else 0
+            
+            # Reject horizontal bands (likely just the floor/wall joint at bottom or purely the ceiling)
+            if aspect_ratio < 4.0 and (y + bh > h * 0.35):
+                results.append({
+                    "bbox": (x, y, x+bw, y+bh),
+                    "area_ratio": box_area / total
+                })
+                
+    # Prioritize the largest structural anomaly
+    results.sort(key=lambda x: x["area_ratio"], reverse=True)
     return results
 
-def scene_conf_adjust(scene, base_conf):
-    """Adjust confidence per scene type."""
-    if scene == "Indoor":   return max(base_conf - 0.05, 0.15)
-    if scene == "Corridor": return max(base_conf - 0.05, 0.15)
-    if scene == "Outdoor":  return min(base_conf + 0.05, 0.60)
-    if scene == "Road":     return base_conf
-    return base_conf
+def scene_conf_adjust(scene):
+    """Return a confidence threshold multiplier for indoor structural objects."""
+    if scene in ("Indoor", "Corridor"):
+        return 0.65  # Lower the barrier for doors/walls indoors
+    if scene == "Outdoor":
+        return 1.2   # Raise the barrier outdoors so we don't accidentally detect clouds as walls
+    return 1.0
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  VOICE ENGINE

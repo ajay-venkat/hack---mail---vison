@@ -251,15 +251,31 @@ class VideoProcessor:
 
                 # ── Layer 1: YOLO ─────────────────────────────────────────
                 sz = ACTIVE["imgsz"]
-                adj_conf = scene_conf_adjust(self.scene, BASE_CONF)
+                # Get the indoor multiplier
+                indoor_multiplier = scene_conf_adjust(self.scene)
+                
+                # YOLO doesn't allow dynamic per-class conf in model(), so we pass a low global conf 
+                # and strictly filter bounding boxes in python afterwards.
+                base_c = 0.15 if indoor_multiplier < 1.0 else BASE_CONF
                 rsz = cv2.resize(img, (sz, sz))
-                results = MODEL(rsz, verbose=False, conf=adj_conf, iou=IOU_THRESHOLD, imgsz=sz)[0]
+                results = MODEL(rsz, verbose=False, conf=base_c, iou=IOU_THRESHOLD, imgsz=sz)[0]
 
                 raw = []
                 for box in results.boxes:
                     lb = MODEL.names[int(box.cls[0])]
                     cf = float(box.conf[0])
-                    if cf < CLASS_CONF.get(lb, 0.45): continue
+                    
+                    # Fetch default confidence requirement for this object
+                    req_conf = CLASS_CONF.get(lb, 0.45)
+                    
+                    # If it's a structural element (wall, door, stairs, floor, window), 
+                    # significantly lower the requirement if we are indoors!
+                    if lb in {"wall", "door", "stairs", "window", "floor", "cabinet"}:
+                        req_conf = max(0.15, req_conf * indoor_multiplier)
+                    
+                    if cf < req_conf: 
+                        continue
+                        
                     x1,y1,x2,y2 = box.xyxy[0].tolist()
                     sx, sy = fw/sz, fh/sz
                     ux1,ux2 = int(x1*sx), int(x2*sx)
