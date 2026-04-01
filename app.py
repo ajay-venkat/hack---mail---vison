@@ -217,21 +217,6 @@ if not st.session_state.tracker_loaded:
     get_tracker().load()
     st.session_state.tracker_loaded = True
 
-# ─── VOICE/HAPTIC EMIT ───────────────────────────────────────────────────────
-def emit_voice_haptic(text, tier, lang_code):
-    vib = haptic_pattern(tier)
-    
-    # We use st.html which executes inside a sandbox iframe.
-    # Therefore, we interact with window.parent to persist state across Streamlit autorefreshes.
-    st.html(f"""
-    <script>
-    var pw = window.parent;
-    if (pw.currentVibrationPattern !== undefined) pw.currentVibrationPattern = {vib};
-    pw.pendingSpeech = `{text.replace('`', '')}`;
-    pw.pendingSpeechLang = `{lang_code}`;
-    </script>
-    """)
-
 # ─── VIDEO PROCESSOR ─────────────────────────────────────────────────────────
 class VideoProcessor:
     def __init__(self):
@@ -317,7 +302,7 @@ class VideoProcessor:
 
                     dt = dist_tier(d_m)
                     dr = direction((ux1+ux2)/2, fw)
-                    mv = self._is_moving((ux1,uy1,ux2,uy2))
+                    mv = self._is_moving((ux1,uy1,ux2,uy2), fw, fh)
                     raw.append({"label_en":lb,"dist_m":d_m,"dist_t":dt,"dir":dr,
                                 "bbox":(ux1,uy1,ux2,uy2),"conf":cf,"moving":mv,
                                 "rank":d_m,"source":"yolo"})
@@ -381,10 +366,12 @@ class VideoProcessor:
             # ── Drawing ───────────────────────────────────────────────────
             annotated = img.copy()
 
-            # Depth overlay
-            if show_depth and ACTIVE["use_midas"]:
+            # Depth overlay safely resized to match annotated image
+            if show_depth and ACTIVE["use_midas"] and midas.depth_map is not None:
                 depth_color = midas.colorize(img.shape)
-                annotated = cv2.addWeighted(annotated, 0.6, depth_color, 0.4, 0)
+                if depth_color is not None:
+                    depth_color = cv2.resize(depth_color, (fw, fh))
+                    annotated = cv2.addWeighted(annotated, 0.6, depth_color, 0.4, 0)
 
             COLORS = {"CRITICAL":(0,0,255),"URGENT":(0,100,255),"WARNING":(0,200,255),"CAUTION":(0,200,0),"FAR":(100,100,100)}
             table_rows = []
@@ -425,9 +412,12 @@ class VideoProcessor:
             print(f"Processing error: {e}")
             return frame
 
-    def _is_moving(self, bbox):
+    def _is_moving(self, bbox, fw, fh):
         if self.motion_mask is None: return False
         x1,y1,x2,y2 = bbox
+        x1, x2 = max(0, min(x1, fw-1)), max(0, min(x2, fw))
+        y1, y2 = max(0, min(y1, fh-1)), max(0, min(y2, fh))
+        if x2 <= x1 or y2 <= y1: return False
         roi = self.motion_mask[y1:y2, x1:x2]
         area = (y2-y1)*(x2-x1)
         if area == 0: return False
@@ -446,6 +436,10 @@ with c4: st.markdown(f"<div class='hud-box hud-blue'><div class='hud-title'>Scen
 RTC_CONFIGURATION = RTCConfiguration({
     "iceServers": [
         {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+        {"urls": ["stun:stun3.l.google.com:19302"]},
+        {"urls": ["stun:stun4.l.google.com:19302"]},
         {
             "urls": [
                 "turn:openrelay.metered.ca:80",
@@ -477,10 +471,11 @@ except Exception as e:
     webrtc_ctx = None
     st.camera_input("Fallback Camera")
 
-if webrtc_ctx and webrtc_ctx.state.playing:
-    st.success("Camera active — processing started")
+if webrtc_ctx is None or not webrtc_ctx.state.playing:
+    st.warning("Camera not connected. Click START above.")
+    st.stop()
 else:
-    st.warning("Click START to begin camera")
+    st.success("Camera active — processing started")
 
 # Detection table
 det_table_area = st.empty()
@@ -530,13 +525,20 @@ if webrtc_ctx and webrtc_ctx.state.playing:
                     hdir = st.session_state.last_clear_direction
                     if hdir=="LEFT": text += ". " + lang["nav_history_left"]
                     if hdir=="RIGHT": text += ". " + lang["nav_history_right"]
-                    emit_voice_haptic(text, dtier, lang["code"])
+                    
+                    st.session_state.pending_speech = text
+                    st.session_state.pending_lang = lang["code"]
+                    st.session_state.pending_vib = haptic_pattern(dtier)
+                    
                     st.session_state.ui_msg = text.upper()
                     st.session_state.ui_msg_class = "priority-urgent"
                 elif elapsed >= interval or lbl != st.session_state.last_spoken_obj:
                     text = VoiceEngine.build_alert(lbl, ddir, dtier, dm, proc.left_clear, proc.right_clear, appr, maway, lang, selected_lang)
                     if text:
-                        emit_voice_haptic(text, dtier, lang["code"])
+                        st.session_state.pending_speech = text
+                        st.session_state.pending_lang = lang["code"]
+                        st.session_state.pending_vib = haptic_pattern(dtier)
+                        
                         st.session_state.ui_msg = text.upper()
                         cmap = {"CRITICAL":"priority-urgent","URGENT":"priority-urgent","WARNING":"priority-warning"}
                         st.session_state.ui_msg_class = cmap.get(dtier, "priority-info")
@@ -555,7 +557,9 @@ if webrtc_ctx and webrtc_ctx.state.playing:
 
             # Track lost announcements
             for lid in tracker.get_lost_ids():
-                emit_voice_haptic(lang["track_lost"], "FAR", lang["code"])
+                st.session_state.pending_speech = lang["track_lost"]
+                st.session_state.pending_lang = lang["code"]
+                st.session_state.pending_vib = haptic_pattern("FAR")
                 add_log(f"Track lost: {lid}")
 
         elif not st.session_state.sos_triggered:
@@ -569,13 +573,19 @@ if webrtc_ctx and webrtc_ctx.state.playing:
                     key = f"scene_{sc.lower()}"
                     txt = lang.get(key, "")
                     if txt:
-                        emit_voice_haptic(txt, "FAR", lang["code"])
+                        st.session_state.pending_speech = txt
+                        st.session_state.pending_lang = lang["code"]
+                        st.session_state.pending_vib = haptic_pattern("FAR")
+                        
                         st.session_state.last_spoken_obj = key
                         st.session_state.last_spoken_time = now
                         st.session_state.ui_msg = txt.upper()
                         add_log(f"Scene: {sc}")
                 elif now - st.session_state.last_clear_time > CLEAR_PATH_INTERVAL:
-                    emit_voice_haptic(lang["clear"], "FAR", lang["code"])
+                    st.session_state.pending_speech = lang["clear"]
+                    st.session_state.pending_lang = lang["code"]
+                    st.session_state.pending_vib = haptic_pattern("FAR")
+                    
                     st.session_state.last_spoken_obj = ""
                     st.session_state.repeat_count = 0
                     st.session_state.last_clear_time = now
@@ -595,3 +605,27 @@ st.markdown(f"""
 
 log_text = "<br>".join(st.session_state.log)
 caregiver_log.markdown(f"<div style='font-family:monospace;font-size:12px;height:300px;overflow-y:scroll;color:#bbb;'>{log_text}</div>", unsafe_allow_html=True)
+
+# ─── SINGLE POINT OF VOICE INJECTION ──────────────────────────────────────────
+if st.session_state.get('pending_speech') or st.session_state.get('pending_vib'):
+    text = st.session_state.get('pending_speech', '').replace("'", "")
+    lang_code = st.session_state.get('pending_lang', 'en-US')
+    vib = st.session_state.get('pending_vib', '[0]')
+    st.html(f"""
+    <script>
+    setTimeout(function() {{
+        var pw = window.parent;
+        if (pw.navigator && pw.navigator.vibrate && {vib}[0] !== 0) {{
+            pw.navigator.vibrate({vib});
+        }}
+        if (pw.speechSynthesis && '{text}' !== '') {{
+            pw.speechSynthesis.cancel();
+            var msg = new pw.SpeechSynthesisUtterance('{text}');
+            msg.lang = '{lang_code}';
+            pw.speechSynthesis.speak(msg);
+        }}
+    }}, 50);
+    </script>
+    """)
+    st.session_state.pending_speech = ""
+    st.session_state.pending_vib = ""
