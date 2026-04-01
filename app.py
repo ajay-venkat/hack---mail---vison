@@ -248,8 +248,12 @@ class VideoProcessor:
 
             # Motion mask
             if self.prev_gray is not None:
-                diff = cv2.absdiff(self.prev_gray, gray)
-                _, self.motion_mask = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                if self.prev_gray.shape != gray.shape:
+                    self.prev_gray = gray.copy()
+                    self.motion_mask = None
+                else:
+                    diff = cv2.absdiff(self.prev_gray, gray)
+                    _, self.motion_mask = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
             self.prev_gray = gray.copy()
 
             now = time.time()
