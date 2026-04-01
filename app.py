@@ -545,12 +545,14 @@ RTC_CONFIG = {
 }
 
 webrtc_ctx = webrtc_streamer(
-    key="visionaid-v4",
+    key="visionaid-v4-prod",
     mode=WebRtcMode.SENDRECV,
     rtc_configuration=RTC_CONFIG,
     video_processor_factory=VideoProcessor,
     media_stream_constraints={
-        "video": True,
+        "video": {
+            "facingMode": "environment",
+        },
         "audio": False
     },
     async_processing=True
