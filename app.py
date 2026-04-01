@@ -103,56 +103,46 @@ components_html_1 = """
 <div id="haptic-container" style="text-align:center;margin-bottom:10px;">
   <button id="arm-btn" style="background:#1A73E8;color:#fff;border:none;padding:15px 30px;
     font-size:1.2rem;font-weight:bold;border-radius:8px;cursor:pointer;width:100%;max-width:400px;
-    font-family:'Inter',sans-serif;text-transform:uppercase;box-shadow:0 4px 6px rgba(0,0,0,0.3); display:none;">
+    font-family:'Inter',sans-serif;text-transform:uppercase;">
     Tap to Enable Audio &amp; Haptics</button>
   <div id="armed-indicator" style="display:none;color:#0F9D58;font-size:1.2rem;font-weight:bold;
-    font-family:'Inter',sans-serif;padding:10px;text-shadow:0 0 10px rgba(15,157,88,0.5);">📳 Haptics ON &nbsp;|&nbsp; 🔊 Voice ON</div>
+    font-family:'Inter',sans-serif;padding:10px;">📳 Haptics ON &nbsp;|&nbsp; 🔊 Voice ON</div>
 </div>
 <audio id="sos-audio" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" loop preload="auto"></audio>
 <script>
-var pw = window.parent;
-if (pw.hapticsArmed === undefined) {
-    pw.hapticsArmed = false;
-    pw.triggerSOS = false;
-}
-
-if (pw.hapticsArmed) {
-    document.getElementById('armed-indicator').style.display = 'block';
-} else {
-    document.getElementById('arm-btn').style.display = 'inline-block';
-}
-
-document.getElementById('arm-btn').addEventListener('click', function() {
-  pw.hapticsArmed = true; 
-  this.style.display = 'none';
-  document.getElementById('armed-indicator').style.display = 'block';
-  
-  if (pw.navigator && pw.navigator.vibrate) pw.navigator.vibrate(50);
-  if (pw.speechSynthesis) {
-      var w = new pw.SpeechSynthesisUtterance(' ');
-      w.volume = 0;
-      pw.speechSynthesis.speak(w);
-  }
-  
-  let a = document.getElementById('sos-audio');
-  a.volume = 0;
-  a.play().then(() => a.pause()).catch(e => {});
-  a.volume = 1;
+var pw=window.parent;
+pw.hapticsArmed=pw.hapticsArmed||false;
+pw.currentVibrationPattern=pw.currentVibrationPattern||[0];
+pw.lastVibrationPattern=pw.lastVibrationPattern||[0];
+pw.lastVibrationTime=pw.lastVibrationTime||0;
+pw.pendingSpeech=pw.pendingSpeech||"";
+pw.pendingSpeechLang=pw.pendingSpeechLang||"en-US";
+pw.lastSpokenText=pw.lastSpokenText||"";
+pw.triggerSOS=pw.triggerSOS||false;
+document.getElementById('arm-btn').addEventListener('click',function(){
+  pw.hapticsArmed=true;this.style.display='none';
+  document.getElementById('armed-indicator').style.display='block';
+  if(navigator.vibrate)navigator.vibrate(50);
+  var w=new SpeechSynthesisUtterance(' ');w.volume=0;window.speechSynthesis.speak(w);
+  let a=document.getElementById('sos-audio');a.volume=0;a.play().then(()=>a.pause()).catch(e=>{});a.volume=1;
 });
-
-let sa = document.getElementById('sos-audio');
-if (pw.triggerSOS) {
-    if (pw.speechSynthesis) pw.speechSynthesis.cancel();
-    if (sa && sa.paused) sa.play().catch(e => {});
-} else {
-    if (sa && !sa.paused) {
-        sa.pause();
-        sa.currentTime = 0;
-    }
-}
+setInterval(function(){
+  if(pw.hapticsArmed&&navigator.vibrate){
+    let n=Date.now(),s=JSON.stringify(pw.currentVibrationPattern)===JSON.stringify(pw.lastVibrationPattern);
+    if(!s||(n-pw.lastVibrationTime)>2000){if(pw.currentVibrationPattern[0]!==0){
+      navigator.vibrate(pw.currentVibrationPattern);pw.lastVibrationPattern=[...pw.currentVibrationPattern];pw.lastVibrationTime=n;}}
+  }
+  if(pw.hapticsArmed&&pw.pendingSpeech&&pw.pendingSpeech!==pw.lastSpokenText&&!window.speechSynthesis.speaking){
+    var u=new SpeechSynthesisUtterance(pw.pendingSpeech);u.lang=pw.pendingSpeechLang;u.rate=1.0;u.volume=1.0;
+    window.speechSynthesis.speak(u);pw.lastSpokenText=pw.pendingSpeech;}
+  let sa=document.getElementById('sos-audio');
+  if(pw.triggerSOS&&sa.paused){window.speechSynthesis.cancel();sa.play();}
+  else if(!pw.triggerSOS&&!sa.paused){sa.pause();sa.currentTime=0;}
+},300);
 </script>
 """
-st.html(components_html_1)
+import streamlit.components.v1 as components
+components.html(components_html_1, height=100)
 
 # ─── SOS BUTTON ───────────────────────────────────────────────────────────────
 if st.button("🚨 PANIC / SOS"):
@@ -592,27 +582,21 @@ log_text = "<br>".join(st.session_state.log)
 caregiver_log.markdown(f"<div style='font-family:monospace;font-size:12px;height:300px;overflow-y:scroll;color:#bbb;'>{log_text}</div>", unsafe_allow_html=True)
 
 # ─── SINGLE POINT OF VOICE INJECTION ──────────────────────────────────────────
+import streamlit.components.v1 as components
+
 if st.session_state.get('pending_speech') or st.session_state.get('pending_vib'):
     text = st.session_state.get('pending_speech', '').replace("'", "")
     lang_code = st.session_state.get('pending_lang', 'en-US')
     vib = st.session_state.get('pending_vib', '[0]')
-    st.html(f"""
+    
+    components.html(f"""
     <script>
-    setTimeout(function() {{
-        var pw = window.parent;
-        if (pw.hapticsArmed) {{
-            if (pw.navigator && pw.navigator.vibrate && {vib}[0] !== 0) {{
-                pw.navigator.vibrate({vib});
-            }}
-            if (pw.speechSynthesis && '{text}' !== '') {{
-                pw.speechSynthesis.cancel();
-                var msg = new pw.SpeechSynthesisUtterance('{text}');
-                msg.lang = '{lang_code}';
-                pw.speechSynthesis.speak(msg);
-            }}
-        }}
-    }}, 50);
+    var pw = window.parent;
+    if (pw.currentVibrationPattern !== undefined) pw.currentVibrationPattern = {vib};
+    pw.pendingSpeechLang = '{lang_code}';
+    pw.pendingSpeech = '{text}';
     </script>
-    """)
+    """, height=0)
+    
     st.session_state.pending_speech = ""
     st.session_state.pending_vib = ""
