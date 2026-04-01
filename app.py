@@ -17,11 +17,18 @@ from vision_engine import (
     URGENT_OBJECTS, WARNING_OBJECTS, OBJECT_PRIORITY,
     REPEAT_INTERVALS, CLEAR_PATH_INTERVAL,
     calc_distance_m, dist_tier, depth_to_tier, depth_to_metres,
-    haptic_pattern, direction,
+    haptic_pattern, direction, haversine,
     detect_fall, detect_stairs, detect_scene, detect_contour_obstacles,
     scene_conf_adjust, VoiceEngine,
     get_midas, get_tracker,
 )
+import requests
+try:
+    import folium
+    from streamlit_folium import st_folium
+    FOLIUM_AVAILABLE = True
+except ImportError:
+    FOLIUM_AVAILABLE = False
 
 # ─── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="VisionAid Pro v4", page_icon="👁️", layout="wide")
@@ -73,6 +80,80 @@ show_depth = st.sidebar.checkbox("🗺️ Show Depth Map Overlay", value=False)
 show_tracks = st.sidebar.checkbox("📦 Show Track IDs", value=True)
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 🗺️ GPS Navigation")
+nav_enabled = st.sidebar.checkbox("🧭 Enable Navigation (Optional)", value=False)
+
+if nav_enabled:
+    st.sidebar.text_input("GPS Hidden", key="gps_data_input", label_visibility="collapsed", disabled=True)
+    import streamlit.components.v1 as components
+    components.html("""
+    <script>
+    if("geolocation" in navigator) {
+        navigator.geolocation.watchPosition(function(pos) {
+            var inputs = window.parent.document.querySelectorAll('input[aria-label="GPS Hidden"]');
+            if(inputs.length > 0) {
+                var input = inputs[0];
+                var oldVal = input.value;
+                var newVal = pos.coords.latitude + "," + pos.coords.longitude;
+                if(oldVal !== newVal) {
+                    input.value = newVal;
+                    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                    nativeInputValueSetter.call(input, newVal);
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+        }, null, {enableHighAccuracy: true, maximumAge: 2000});
+    }
+    </script>
+    """, height=0)
+    
+    # Process GPS from hidden input
+    gps_raw = st.session_state.get("gps_data_input", "")
+    if gps_raw and "," in gps_raw:
+        try:
+            st.session_state.user_lat = float(gps_raw.split(",")[0])
+            st.session_state.user_lon = float(gps_raw.split(",")[1])
+        except: pass
+        
+    dest_str = st.sidebar.text_input("Enter Destination:")
+    if st.sidebar.button("Start Navigation") and dest_str and st.session_state.user_lat is not None:
+        try:
+            # Geocode
+            url = f"https://nominatim.openstreetmap.org/search?q={dest_str}&format=json"
+            jsn = requests.get(url, headers={'User-Agent':'VisionAid'}, timeout=5).json()
+            if jsn:
+                st.session_state.dest_lat = float(jsn[0]['lat'])
+                st.session_state.dest_lon = float(jsn[0]['lon'])
+                st.sidebar.success(f"Found: {jsn[0]['display_name'][:30]}")
+                st.session_state.nav_active = True
+                
+                # Fetch route
+                steps, coords = get_route(st.session_state.user_lat, st.session_state.user_lon, st.session_state.dest_lat, st.session_state.dest_lon)
+                st.session_state.nav_steps = steps
+                st.session_state.nav_step_index = 0
+                st.session_state.ui_msg = "ROUTE CALCULATED"
+                st.session_state.ui_msg_class = "priority-info"
+            else:
+                st.sidebar.error("Location not found.")
+        except Exception as e:
+            st.sidebar.error(f"Geocoding error: {e}")
+
+    if st.sidebar.button("Stop Nav"):
+        st.session_state.nav_active = False
+        st.session_state.ui_msg = "NAVIGATION STOPPED"
+        
+    # Render Folium Map
+    if FOLIUM_AVAILABLE and st.session_state.user_lat:
+        try:
+            m = folium.Map(location=[st.session_state.user_lat, st.session_state.user_lon], zoom_start=15, tiles='CartoDB positron')
+            folium.CircleMarker([st.session_state.user_lat, st.session_state.user_lon], radius=8, color='blue', fill=True).add_to(m)
+            if st.session_state.dest_lat:
+                folium.Marker([st.session_state.dest_lat, st.session_state.dest_lon], icon=folium.Icon(color='red')).add_to(m)
+            st_folium(m, width=300, height=250)
+        except Exception as e:
+            st.sidebar.error("Map render failed.")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("### 📋 Caregiver Log")
 caregiver_log = st.sidebar.empty()
 
@@ -90,6 +171,9 @@ for k, v in {
     "sos_triggered":False,"fall_detected_time":0.0,"prev_gray":None,
     "ui_dist_m":"--","ui_obj":"--","ui_dir":"--","ui_scene":"Unknown",
     "ui_det_table":[], "midas_loaded":False, "tracker_loaded":False,
+    "nav_enabled": False, "nav_active": False, "nav_steps": [],
+    "nav_step_index": 0, "nav_paused": False, "obstacle_pause_until": 0.0,
+    "user_lat": None, "user_lon": None, "dest_lat": None, "dest_lon": None,
 }.items():
     if k not in st.session_state: st.session_state[k] = v
 
@@ -188,8 +272,39 @@ if not st.session_state.tracker_loaded:
     get_tracker().load()
     st.session_state.tracker_loaded = True
 
-# ─── VIDEO PROCESSOR ─────────────────────────────────────────────────────────
-class VideoProcessor:
+# ─── NAVIGATION ENGINE (OSRM) ───────────────────────────────────────────────────
+def get_route(start_lat, start_lon, end_lat, end_lon):
+    url = (
+        f"http://router.project-osrm.org/route/v1/foot/"
+        f"{start_lon},{start_lat};{end_lon},{end_lat}"
+        f"?steps=true&geometries=geojson&overview=full"
+    )
+    try:
+        r = requests.get(url, timeout=5)
+        d = r.json()
+        if d.get("code") == "Ok":
+            return d['routes'][0]['legs'][0]['steps'], d['routes'][0]['geometry']['coordinates']
+    except Exception as e:
+        print(f"OSRM Error: {e}")
+    return [], []
+
+def parse_step(step, lang_dict):
+    maneuver = step.get('maneuver', {}).get('type', '')
+    modifier = step.get('maneuver', {}).get('modifier', '')
+    dist = step.get('distance', 0)
+    
+    if maneuver == 'turn' and 'left' in modifier:
+        txt = lang_dict.get("turn_left", "Turn left in {n} metres")
+    elif maneuver == 'turn' and 'right' in modifier:
+        txt = lang_dict.get("turn_right", "Turn right in {n} metres")
+    elif maneuver in ('straight', 'continue') or 'straight' in modifier:
+        txt = lang_dict.get("straight", "Continue straight for {n} metres")
+    elif maneuver == 'arrive':
+        return lang_dict.get("arrived", "You have arrived at your destination"), 0
+    else:
+        txt = f"Continue for {{n}} metres"
+        
+    return txt.replace("{n}", str(int(dist))), dist
     def __init__(self):
         self.latest_label_en = ""
         self.latest_dir = "CENTER"
@@ -533,6 +648,14 @@ if webrtc_ctx and webrtc_ctx.state.playing:
                         st.session_state.ui_msg = text.upper()
                         cmap = {"CRITICAL":"priority-urgent","URGENT":"priority-urgent","WARNING":"priority-warning"}
                         st.session_state.ui_msg_class = cmap.get(dtier, "priority-info")
+                        
+                        # OBSTACLE OVERRIDE: Pause Navigation if Urgent
+                        if dtier in ("CRITICAL", "URGENT"):
+                            st.session_state.obstacle_pause_until = time.time() + 4.0
+                            st.session_state.nav_paused = True
+                        elif dtier == "WARNING":
+                            st.session_state.obstacle_pause_until = max(st.session_state.obstacle_pause_until, time.time() + 2.0)
+                            st.session_state.nav_paused = True
 
                 # Record
                 if lbl == st.session_state.last_spoken_obj:
@@ -582,6 +705,61 @@ if webrtc_ctx and webrtc_ctx.state.playing:
                     st.session_state.last_clear_time = now
                     st.session_state.ui_msg = lang["clear"].upper()
                     st.session_state.ui_msg_class = "priority-clear"
+
+        # ─── NAVIGATION STATE MACHINE ───────────────────────────────────────────
+        if st.session_state.nav_active and st.session_state.nav_steps:
+            if st.session_state.nav_paused:
+                if time.time() > st.session_state.obstacle_pause_until:
+                    # If the latest obstacle is STILL CRITICAL/URGENT, don't unpause!
+                    if proc.latest_dist_t not in ("CRITICAL", "URGENT"):
+                        st.session_state.nav_paused = False
+                        st.session_state.pending_speech = lang.get("path_clear_nav_resume", "Path clear")
+                        st.session_state.ui_msg = "PATH CLEAR - RESUMING NAV"
+                        st.session_state.ui_msg_class = "priority-info"
+            else:
+                idx = st.session_state.nav_step_index
+                steps = st.session_state.nav_steps
+                if idx < len(steps):
+                    curr = steps[idx]
+                    # OSRM locations are [lon, lat]
+                    wl = curr.get('maneuver', {}).get('location', [0,0])
+                    way_lon, way_lat = wl[0], wl[1]
+                    dist_to_waypt = haversine(st.session_state.user_lat, st.session_state.user_lon, way_lat, way_lon)
+                    
+                    txt, s_dist = parse_step(curr, lang)
+                    
+                    # If within 20m of a turn, announce it (only once roughly)
+                    if dist_to_waypt < 25 and dist_to_waypt > 10 and not st.session_state.get('nav_turn_announced'):
+                        if not st.session_state.pending_speech:
+                            st.session_state.pending_speech = txt
+                            st.session_state.nav_turn_announced = True
+                    
+                    # Reached waypoint
+                    if dist_to_waypt < 12:
+                        st.session_state.nav_step_index += 1
+                        st.session_state.nav_turn_announced = False
+                        if st.session_state.nav_step_index >= len(steps):
+                            st.session_state.pending_speech = lang.get("arrived", "Arrived")
+                            st.session_state.nav_active = False
+                            st.session_state.ui_msg = "ARRIVED"
+                        else:
+                            nxt_txt, _ = parse_step(steps[st.session_state.nav_step_index], lang)
+                            if not st.session_state.pending_speech:
+                                st.session_state.pending_speech = nxt_txt
+                                
+                    elif dist_to_waypt > 200: # Off route heavily
+                        st.session_state.pending_speech = lang.get("recalculating", "Recalculating")
+                        try:
+                            new_s, _ = get_route(st.session_state.user_lat, st.session_state.user_lon, st.session_state.dest_lat, st.session_state.dest_lon)
+                            if new_s:
+                                st.session_state.nav_steps = new_s
+                                st.session_state.nav_step_index = 0
+                                st.session_state.nav_turn_announced = False
+                        except: pass
+
+        # Update logs
+        if st.session_state.ui_msg != "START NAVIGATION to begin":
+            add_log(f"SYS: {st.session_state.ui_msg}")
 
 # Status panel
 mode_info = f"{ACTIVE['model']} | {ACTIVE['imgsz']}px"

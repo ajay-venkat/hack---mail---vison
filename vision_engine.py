@@ -104,6 +104,13 @@ LANGUAGES = {
     "nav_obj_on_left":"Object on left - move right",
     "nav_obj_on_right":"Object on right - move left",
     "still_ahead":"still ahead","persists":"Obstacle persists, please navigate carefully",
+    "turn_left":"Turn left in {n} metres",
+    "turn_right":"Turn right in {n} metres",
+    "straight":"Continue straight for {n} metres",
+    "arrived":"You have arrived at your destination",
+    "recalculating":"Off route, recalculating. Please wait.",
+    "path_clear_nav_resume":"Path safely clear. Continuing navigation.",
+    "nav_paused_obstacle":"Warning! Obstacle priority. Navigation paused.",
   },
   "Tamil": {
     "code":"ta-IN","warning":"எச்சரிக்கை",
@@ -138,6 +145,13 @@ LANGUAGES = {
     "nav_obj_on_left":"தடை இடதுபுறம் - வலதுபுறம் செல்லுங்கள்",
     "nav_obj_on_right":"தடை வலதுபுறம் - இடதுபுறம் செல்லுங்கள்",
     "still_ahead":"இன்னும் முன்னால் உள்ளது","persists":"தடை தொடர்கிறது, கவனமாக செல்லுங்கள்",
+    "turn_left":"{n} மீட்டரில் இடதுபுறம் திரும்புங்கள்",
+    "turn_right":"{n} மீட்டரில் வலதுபுறம் திரும்புங்கள்",
+    "straight":"{n} மீட்டர் நேராக செல்லுங்கள்",
+    "arrived":"நீங்கள் உங்கள் இலக்கை அடைந்துவிட்டீர்கள்",
+    "recalculating":"வழி மாறுபட்டது, புதிய வழியைக் கணக்கிடுகிறது",
+    "path_clear_nav_resume":"பாதை தெளிவாக உள்ளது, வழிகாட்டல் தொடர்கிறது",
+    "nav_paused_obstacle":"தடை உள்ளது, வழிசெலுத்தல் இடைநிறுத்தப்பட்டது",
   },
   "Hindi": {
     "code":"hi-IN","warning":"चेतावनी",
@@ -172,6 +186,13 @@ LANGUAGES = {
     "nav_obj_on_left":"बाईं तरफ रुकावट - दाईं ओर जाएं",
     "nav_obj_on_right":"दाईं तरफ रुकावट - बाईं ओर जाएं",
     "still_ahead":"अभी भी आगे है","persists":"बाधा बनी है, सावधानी से चलें",
+    "turn_left":"{n} मीटर में बाईं ओर मुड़ें",
+    "turn_right":"{n} मीटर में दाईं ओर मुड़ें",
+    "straight":"{n} मीटर सीधे चलते रहें",
+    "arrived":"आप अपने गंतव्य पर पहुंच गए हैं",
+    "recalculating":"मार्ग से भटक गए, नया मार्ग खोज रहे हैं",
+    "path_clear_nav_resume":"रास्ता साफ है, नेविगेशन जारी है",
+    "nav_paused_obstacle":"बाधा है, नेविगेशन रुका हुआ है",
   },
 }
 
@@ -247,6 +268,17 @@ def direction(cx, fw):
     if r < 0.35: return "LEFT"
     if r > 0.65: return "RIGHT"
     return "CENTER"
+
+import math
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculate the great-circle distance between two GPS points in metres."""
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None: return 99999.0
+    R = 6371000  # radius of Earth in metres
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MiDaS DEPTH ENGINE
